@@ -1,7 +1,6 @@
 services:
   - type: web
-    name: servidor-video
+    name: ctm210183
     env: docker
-    dockerfilePath: Dockerfile
     plan: free
     autoDeploy: true
