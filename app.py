@@ -6,7 +6,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# 🔧 Configurar ImageMagick
+# 🛠️ ImageMagick path para MoviePy
 os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/convert"
 
 app = Flask(__name__)
@@ -19,13 +19,12 @@ credentials = service_account.Credentials.from_service_account_file(
 )
 drive_service = build("drive", "v3", credentials=credentials)
 
-# 📁 ID de la carpeta "HEISENBERESTUDIO"
-FOLDER_ID = "1952GPiJ002KyA8hYkEnt7nvSSGAHweoN"
-
+# 🏠 Ruta base
 @app.route("/")
 def home():
     return "Servidor activo ✅"
 
+# 🎬 Endpoint de generación de video
 @app.route("/generar_video", methods=["POST"])
 def generar_video():
     data = request.get_json()
@@ -33,13 +32,9 @@ def generar_video():
     text = data.get("text", "")
 
     try:
-        # 🎬 Crear fondo + texto
+        # 🎨 Crear fondo + texto
         clip = TextClip(
-            text,
-            fontsize=60,
-            color="white",
-            font="DejaVu-Sans",
-            size=(720, 1280)
+            text, fontsize=60, color="white", font="DejaVu-Sans", size=(720, 1280)
         ).set_duration(10)
         background = ColorClip(size=(720, 1280), color=(0, 0, 0), duration=10)
         video = CompositeVideoClip([background, clip.set_position("center")])
@@ -49,24 +44,24 @@ def generar_video():
             video_path = tmp.name
             video.write_videofile(video_path, fps=24)
 
-        # ☁️ Subir a Google Drive dentro de la carpeta
+        # ☁️ Subir a carpeta específica en Google Drive
+        folder_id = "1952GPiJ002KyA8hYkEnt7nvSSGAHweoN"
         file_metadata = {
             "name": f"{idea}.mp4",
             "mimeType": "video/mp4",
-            "parents": [FOLDER_ID]
+            "parents": [folder_id],
         }
         media = MediaFileUpload(video_path, mimetype="video/mp4")
-        file = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields="id"
-        ).execute()
+        file = (
+            drive_service.files()
+            .create(body=file_metadata, media_body=media, fields="id")
+            .execute()
+        )
         file_id = file.get("id")
 
-        # 🌐 Hacer el video público
+        # 🌍 Hacer público el archivo
         drive_service.permissions().create(
-            fileId=file_id,
-            body={"type": "anyone", "role": "reader"},
+            fileId=file_id, body={"type": "anyone", "role": "reader"}
         ).execute()
 
         video_url = f"https://drive.google.com/uc?id={file_id}"
@@ -77,5 +72,6 @@ def generar_video():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
 
 
