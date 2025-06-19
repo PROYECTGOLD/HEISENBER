@@ -1,14 +1,14 @@
 from flask import Flask, request, jsonify
-import os
 from moviepy.editor import TextClip, CompositeVideoClip
+import os
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 app = Flask(__name__)
 
-# Credenciales y configuración de Google Drive
-SERVICE_ACCOUNT_FILE = "heisenberg-463407-63df8f900747.json"
+# Cargar credenciales desde el archivo secreto
+SERVICE_ACCOUNT_FILE = "/etc/secrets/heisenberg-credentials.json"
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 credentials = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES
@@ -25,18 +25,20 @@ def generar_video():
     idea = data.get("idea", "")
     text = data.get("text", "")
 
-    # Crear video simple con texto
-    clip = TextClip(txt=text, fontsize=70, color='white', size=(720, 1280))
-    clip = clip.set_duration(10)
-    video_path = "output.mp4"
-    clip.write_videofile(video_path, fps=24)
+    # Crear video con MoviePy
+    clip = TextClip(text, fontsize=60, color="white", size=(720, 1280)).set_duration(10)
+    video = CompositeVideoClip([clip])
+    video_path = "/tmp/video.mp4"
+    video.write_videofile(video_path, fps=24)
 
     # Subir a Google Drive
     file_metadata = {"name": f"{idea}.mp4", "mimeType": "video/mp4"}
     media = MediaFileUpload(video_path, mimetype="video/mp4")
     file = drive_service.files().create(body=file_metadata, media_body=media, fields="id").execute()
     file_id = file.get("id")
-    drive_service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
-    video_url = f"https://drive.google.com/file/d/{file_id}/view"
+    video_url = f"https://drive.google.com/uc?id={file_id}"
 
     return jsonify({"status": "ok", "video_url": video_url})
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

@@ -1,5 +1,6 @@
-📁 CTM210183
-├── app.py
-├── Dockerfile
-├── requirements.txt
-├── render.yaml
+services:
+  - type: web
+    name: heisenber1
+    env: docker
+    plan: free
+    autoDeploy: true
