@@ -1,16 +1,16 @@
 from flask import Flask, request, jsonify
-from moviepy.editor import TextClip, CompositeVideoClip
+from moviepy.editor import TextClip, CompositeVideoClip, ColorClip
 import os
+import tempfile
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# 🛠️ Establecer path correcto para ImageMagick
 os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/convert"
 
 app = Flask(__name__)
 
-# ✅ Cargar credenciales
+# ✅ Autenticación con Google Drive
 SERVICE_ACCOUNT_FILE = "/etc/secrets/heisenberg-credentials.json"
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 credentials = service_account.Credentials.from_service_account_file(
@@ -29,10 +29,14 @@ def generar_video():
     text = data.get("text", "")
 
     try:
-        # 🖋️ Crear clip de texto
+        # 🖋️ Crear fondo + texto
         clip = TextClip(text, fontsize=60, color="white", font="DejaVu-Sans", size=(720, 1280)).set_duration(10)
-        video = CompositeVideoClip([clip])
-        video_path = "/tmp/video.mp4"
+        background = ColorClip(size=(720, 1280), color=(0, 0, 0), duration=10)
+        video = CompositeVideoClip([background, clip.set_position("center")])
+
+        # 🎞️ Guardar temporalmente
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+            video_path = tmp.name
         video.write_videofile(video_path, fps=24)
 
         # ☁️ Subir a Google Drive
@@ -40,9 +44,16 @@ def generar_video():
         media = MediaFileUpload(video_path, mimetype="video/mp4")
         file = drive_service.files().create(body=file_metadata, media_body=media, fields="id").execute()
         file_id = file.get("id")
-        video_url = f"https://drive.google.com/uc?id={file_id}"
 
+        # 🌐 Hacer público
+        drive_service.permissions().create(
+            fileId=file_id,
+            body={"type": "anyone", "role": "reader"},
+        ).execute()
+
+        video_url = f"https://drive.google.com/uc?id={file_id}"
         return jsonify({"status": "ok", "video_url": video_url})
+
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
