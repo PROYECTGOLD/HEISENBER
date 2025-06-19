@@ -1,17 +1,15 @@
 from flask import Flask, request, jsonify
-from moviepy.editor import TextClip, CompositeVideoClip, ColorClip
-from datetime import datetime
+import os
+from moviepy.editor import TextClip, CompositeVideoClip
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-import os
 
 app = Flask(__name__)
 
-# Cargar credenciales de servicio
+# Credenciales y configuración de Google Drive
 SERVICE_ACCOUNT_FILE = "heisenberg-463407-63df8f900747.json"
-SCOPES = ["https://www.googleapis.com/auth/drive"]
-
+SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 credentials = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES
 )
@@ -24,45 +22,21 @@ def home():
 @app.route("/generar_video", methods=["POST"])
 def generar_video():
     data = request.get_json()
-    idea = data.get("idea", "Sin idea")
-    text = data.get("text", "Sin texto")
+    idea = data.get("idea", "")
+    text = data.get("text", "")
 
-    # Crear video con MoviePy
-    width, height = 1080, 1920  # Formato vertical
-    color_clip = ColorClip(size=(width, height), color=(0, 0, 0), duration=10)
-
-    text_clip = TextClip(text, fontsize=60, color='white', size=(width - 100, None), method='caption')
-    text_clip = text_clip.set_position('center').set_duration(10)
-
-    final = CompositeVideoClip([color_clip, text_clip])
-
-    filename = f"video_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
-    final.write_videofile(filename, fps=24)
+    # Crear video simple con texto
+    clip = TextClip(txt=text, fontsize=70, color='white', size=(720, 1280))
+    clip = clip.set_duration(10)
+    video_path = "output.mp4"
+    clip.write_videofile(video_path, fps=24)
 
     # Subir a Google Drive
-    file_metadata = {
-        'name': filename,
-        'parents': ['root']  # O especificar carpeta con su ID
-    }
-    media = MediaFileUpload(filename, mimetype='video/mp4')
-    file = drive_service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields='id'
-    ).execute()
-
-    # Hacerlo público
-    drive_service.permissions().create(
-        fileId=file['id'],
-        body={"role": "reader", "type": "anyone"},
-    ).execute()
-
-    video_url = f"https://drive.google.com/uc?id={file['id']}"
-
-    # Eliminar el archivo local
-    os.remove(filename)
+    file_metadata = {"name": f"{idea}.mp4", "mimeType": "video/mp4"}
+    media = MediaFileUpload(video_path, mimetype="video/mp4")
+    file = drive_service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    file_id = file.get("id")
+    drive_service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
+    video_url = f"https://drive.google.com/file/d/{file_id}/view"
 
     return jsonify({"status": "ok", "video_url": video_url})
-
-if __name__ == "__main__":
-    app.run(debug=True)
