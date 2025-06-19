@@ -28,8 +28,10 @@ def generar_video():
         font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
         font = ImageFont.truetype(font_path, 60)
 
-        # Centrar texto
-        text_width, text_height = draw.textsize(texto, font=font)
+        # ✅ Centrar texto con textbbox (correcto)
+        bbox = draw.textbbox((0, 0), texto, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
         x = (img.width - text_width) / 2
         y = (img.height - text_height) / 2
         draw.text((x, y), texto, font=font, fill=(255, 255, 255))
