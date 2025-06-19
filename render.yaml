@@ -1,6 +1,5 @@
-services:
-  - type: web
-    name: ctm210183
-    env: docker
-    plan: free
-    autoDeploy: true
+📁 CTM210183
+├── app.py
+├── Dockerfile
+├── requirements.txt
+├── render.yaml
