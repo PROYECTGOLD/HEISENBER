@@ -59,19 +59,23 @@ def generar_video():
         )
         file_id = file.get("id")
 
-        # 🌍 Hacer público el archivo
+        # 🌍 Hacer el archivo público
         drive_service.permissions().create(
-            fileId=file_id, body={"type": "anyone", "role": "reader"}
+            fileId=file_id,
+            body={"type": "anyone", "role": "reader"},
         ).execute()
 
+        # 🔗 Generar enlace público
         video_url = f"https://drive.google.com/uc?id={file_id}"
         return jsonify({"status": "ok", "video_url": video_url})
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# 🚀 Ejecutar con Gunicorn en producción
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
 
 
 
