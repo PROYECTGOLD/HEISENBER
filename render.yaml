@@ -1,5 +1,5 @@
 /HEISENBER/
 ├── app.py
 ├── requirements.txt
-├── /assets/            # debe contener musica.mp3
-└── heisenberg-credentials.json (ya cargado en Render como /etc/secrets/)
+├── /assets/            
+└── heisenberg-credentials.json 
