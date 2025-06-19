@@ -6,11 +6,12 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
+# Configurar ImageMagick
 os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/convert"
 
 app = Flask(__name__)
 
-# ✅ Autenticación con Google Drive
+# Autenticación con Google Drive
 SERVICE_ACCOUNT_FILE = "/etc/secrets/heisenberg-credentials.json"
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 credentials = service_account.Credentials.from_service_account_file(
@@ -29,23 +30,23 @@ def generar_video():
     text = data.get("text", "")
 
     try:
-        # 🖋️ Crear fondo + texto
+        # Crear fondo + texto
         clip = TextClip(text, fontsize=60, color="white", font="DejaVu-Sans", size=(720, 1280)).set_duration(10)
         background = ColorClip(size=(720, 1280), color=(0, 0, 0), duration=10)
         video = CompositeVideoClip([background, clip.set_position("center")])
 
-        # 🎞️ Guardar temporalmente
+        # Guardar archivo temporal
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
             video_path = tmp.name
         video.write_videofile(video_path, fps=24)
 
-        # ☁️ Subir a Google Drive
+        # Subir a Google Drive
         file_metadata = {"name": f"{idea}.mp4", "mimeType": "video/mp4"}
         media = MediaFileUpload(video_path, mimetype="video/mp4")
         file = drive_service.files().create(body=file_metadata, media_body=media, fields="id").execute()
         file_id = file.get("id")
 
-        # 🌐 Hacer público
+        # Hacer público
         drive_service.permissions().create(
             fileId=file_id,
             body={"type": "anyone", "role": "reader"},
@@ -59,4 +60,5 @@ def generar_video():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
 
