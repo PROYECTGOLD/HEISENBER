@@ -1,100 +1,78 @@
-from flask import Flask, request, jsonify
-from moviepy.editor import *
-from datetime import datetime
-import requests
 import os
 import random
-import string
+from flask import Flask, request, jsonify
+from moviepy.editor import *
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from pydub import AudioSegment
-from pydub.playback import play
+from datetime import datetime
 
-# Config
-CARPETA_DRIVE_ID = '1952GPiJ002KyA8hYkEnt7nvSSGAHweoN'
-CREDENTIALS_PATH = '/etc/secrets/heisenberg-credentials.json'
-SPREADSHEET_ID = '1lcGzXs4QR2rjvVJR8E8Eo8znLZbMALYpnF4AZgn5BMQ'
+# Cargar credenciales de Google
+scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+credentials_path = '/etc/secrets/heisenberg-463407-63df8f900747.json'
+creds = ServiceAccountCredentials.from_json_keyfile_name(credentials_path, scope)
+client = gspread.authorize(creds)
+
+# Google Sheets
+spreadsheet_id = '1lcGzXs4QR2rjvVJR8E8Eo8znLZbMALYpnF4AZgn5BMQ'
+sheet = client.open_by_key(spreadsheet_id).sheet1
+
+# Drive
+folder_id = '1952GPiJ002KyA8hYkEnt7nvSSGAHweoN'
 
 app = Flask(__name__)
 
-def generar_nombre():
-    return 'video_' + datetime.now().strftime('%Y%m%d%H%M%S') + '.mp4'
+@app.route('/generar_video', methods=['POST'])
+def generar_video():
+    data = request.get_json()
+    idea = data.get("idea", "Sin título")
+    text = data.get("text", "")
 
-def generar_imagenes(idea):
-    imagenes = []
-    for i in range(3):
-        url = 'https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2'
-        headers = {"Authorization": f"Bearer {os.getenv('HF_TOKEN')}"}
-        payload = {"inputs": idea}
-        response = requests.post(url, headers=headers, json=payload)
-        filename = f"imagen_{i}.jpg"
-        with open(filename, "wb") as f:
-            f.write(response.content)
-        imagenes.append(filename)
-    return imagenes
-
-def generar_musica():
-    musica = random.choice(['musica1.mp3', 'musica2.mp3', 'musica3.mp3'])
-    return AudioFileClip(musica).subclip(0, 12)
-
-def generar_video(imagenes):
+    # 1. Generar 3 imágenes simuladas (aquí puedes usar Replicate o similar)
     clips = []
-    duracion = 4
-    for img in imagenes:
-        clips.append(ImageClip(img).set_duration(duracion).resize(height=1080).set_position("center"))
-    video = concatenate_videoclips(clips, method="compose")
-    return video
+    for i in range(3):
+        img = ColorClip(size=(720, 1280), color=random_color(), duration=4)
+        txt = TextClip(idea, fontsize=60, color='white', size=img.size, method='caption')
+        txt = txt.set_position('center').set_duration(4)
+        final = CompositeVideoClip([img, txt])
+        clips.append(final)
 
-def subir_a_drive(nombre_video):
+    video = concatenate_videoclips(clips)
+    audio = AudioFileClip("assets/musica.mp3").subclip(0, 12)
+    video = video.set_audio(audio)
+
+    nombre_archivo = f"video_{datetime.now().strftime('%Y%m%d%H%M%S')}.mp4"
+    ruta_video = f"/tmp/{nombre_archivo}"
+    video.write_videofile(ruta_video, fps=24)
+
+    # 2. Subir a Google Drive
     from pydrive.auth import GoogleAuth
     from pydrive.drive import GoogleDrive
-    
     gauth = GoogleAuth()
-    gauth.LoadCredentialsFile(CREDENTIALS_PATH)
-    gauth.LocalWebserverAuth()
+    gauth.credentials = creds
     drive = GoogleDrive(gauth)
 
-    file = drive.CreateFile({'title': nombre_video, 'parents': [{'id': CARPETA_DRIVE_ID}]})
-    file.SetContentFile(nombre_video)
-    file.Upload()
-    return file['alternateLink']
+    upload_file = drive.CreateFile({'title': nombre_archivo, 'parents': [{"id": folder_id}]})
+    upload_file.SetContentFile(ruta_video)
+    upload_file.Upload()
+    video_url = f"https://drive.google.com/file/d/{upload_file['id']}/view"
 
-def actualizar_hoja(fila, video_url):
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(SPREADSHEET_ID).sheet1
-    sheet.update_cell(fila, 4, video_url)
-    sheet.update_cell(fila, 3, 'hecho')
+    # 3. Marcar como "hecho"
+    celda = buscar_fila_por_idea(sheet, idea)
+    if celda:
+        sheet.update_cell(celda.row, celda.col + 2, "hecho")
+        sheet.update_cell(celda.row, celda.col + 3, video_url)
 
-@app.route('/generar_video', methods=['POST'])
-def generar_video_endpoint():
-    data = request.get_json()
-    idea = data.get("idea")
-    texto = data.get("text")
-    fila = data.get("fila")  # número de fila a actualizar
+    return jsonify({"status": "ok", "video_url": video_url})
 
-    try:
-        imagenes = generar_imagenes(idea)
-        video_clip = generar_video(imagenes)
-        audio_clip = generar_musica()
+def buscar_fila_por_idea(sheet, idea):
+    celdas = sheet.findall(idea)
+    return celdas[0] if celdas else None
 
-        final = video_clip.set_audio(audio_clip)
-        nombre_video = generar_nombre()
-        final.write_videofile(nombre_video, fps=24)
-
-        video_url = subir_a_drive(nombre_video)
-        actualizar_hoja(fila, video_url)
-
-        return jsonify({"video_url": video_url})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+def random_color():
+    return tuple(random.randint(0, 255) for _ in range(3))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
-
-
+    app.run(debug=True, host="0.0.0.0", port=10000)
 
 
 
