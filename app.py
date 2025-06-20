@@ -1,75 +1,87 @@
-import os
-import json
-import tempfile
-import random
-import requests
 from flask import Flask, request, jsonify
-from moviepy.editor import *
-from pydub import AudioSegment
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from moviepy.editor import ImageClip, concatenate_videoclips, AudioFileClip
+from datetime import datetime
+import os
+import requests
+import tempfile
+import shutil
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
+from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
 
-# Autenticación con Google Drive
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
-SERVICE_ACCOUNT_FILE = '/etc/secrets/heisenberg-credentials.json'
+# Cargar credenciales desde ruta segura en Render
+CREDENTIALS_PATH = "/etc/secrets/heisenberg-credentials.json"
 
-credentials = Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-drive_service = build('drive', 'v3', credentials=credentials)
+# Ruta de la carpeta de destino en Google Drive
+FOLDER_ID = "1952GPiJ002KyA8hYkEnt7nvSSGAHweoN"
 
-FOLDER_ID = '1952GPiJ002KyA8hYkEnt7nvSSGAHweoN'
+def upload_to_drive(file_path, file_name):
+    scope = ['https://www.googleapis.com/auth/drive']
+    credentials = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, scope)
+    gauth = GoogleAuth()
+    gauth.credentials = credentials
+    drive = GoogleDrive(gauth)
 
-@app.route("/")
-def index():
-    return "Servidor en producción con Gunicorn ✅"
+    file_drive = drive.CreateFile({'title': file_name, 'parents': [{'id': FOLDER_ID}]})
+    file_drive.SetContentFile(file_path)
+    file_drive.Upload()
+    return file_drive['alternateLink']
 
 @app.route("/generar_video", methods=["POST"])
 def generar_video():
-    data = request.get_json()
-    idea = data.get("idea", "Idea sin nombre")
-    imagenes = data.get("imagenes", [])
+    try:
+        data = request.get_json()
 
-    if len(imagenes) < 3:
-        return jsonify({"error": "Se requieren al menos 3 imágenes."}), 400
+        # Validaciones básicas
+        if not data:
+            return jsonify({"error": "Falta cuerpo JSON"}), 400
 
-    clips = []
-    duration = 4  # 4 segundos por imagen × 3 = 12s
+        idea = data.get("idea")
+        imagenes = data.get("imagenes")
 
-    for url in imagenes[:3]:
-        response = requests.get(url)
-        temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-        temp_img.write(response.content)
-        temp_img.close()
+        if not idea or not imagenes or len(imagenes) != 3:
+            return jsonify({"error": "Faltan campos: idea o 3 imágenes"}), 400
 
-        img_clip = ImageClip(temp_img.name).set_duration(duration).resize(height=1080).set_position("center").set_fps(30)
-        clips.append(img_clip)
+        # Crear clips
+        temp_dir = tempfile.mkdtemp()
+        clips = []
 
-    final_clip = concatenate_videoclips(clips, method="compose")
+        for idx, url in enumerate(imagenes):
+            try:
+                response = requests.get(url, stream=True)
+                if response.status_code != 200:
+                    return jsonify({"error": f"Imagen {idx+1} no descargada correctamente"}), 400
+                img_path = os.path.join(temp_dir, f"img{idx}.jpg")
+                with open(img_path, 'wb') as f:
+                    f.write(response.content)
+                clip = ImageClip(img_path, duration=4).resize(height=1920).resize(width=1080)
+                clips.append(clip)
+            except Exception as e:
+                return jsonify({"error": f"Error con imagen {idx+1}: {str(e)}"}), 400
 
-    # Música de fondo
-    music_path = os.path.join("assets", "musica.mp3")
-    if os.path.exists(music_path):
-        music = AudioFileClip(music_path).subclip(0, final_clip.duration)
-        final_clip = final_clip.set_audio(music)
+        # Música de fondo opcional
+        audio = AudioFileClip("assets/music.mp3").volumex(0.5)
+        final_video = concatenate_videoclips(clips, method="compose")
+        final_video = final_video.set_audio(audio).set_duration(12)
 
-    output_filename = f"video_{idea.replace(' ', '_')}.mp4"
-    final_path = os.path.join(tempfile.gettempdir(), output_filename)
-    final_clip.write_videofile(final_path, fps=30)
+        output_path = os.path.join(temp_dir, "output.mp4")
+        final_video.write_videofile(output_path, fps=24)
 
-    # Subir a Google Drive
-    file_metadata = {
-        'name': output_filename,
-        'parents': [FOLDER_ID]
-    }
-    media = MediaFileUpload(final_path, mimetype='video/mp4')
-    uploaded_file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-    video_id = uploaded_file.get('id')
-    video_url = f"https://drive.google.com/file/d/{video_id}/view"
+        # Subir a Drive
+        nombre_archivo = f"video_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+        video_url = upload_to_drive(output_path, nombre_archivo)
 
-    return jsonify({"status": "ok", "video_url": video_url})
+        shutil.rmtree(temp_dir)
+        return jsonify({"video_url": video_url})
+
+    except Exception as e:
+        return jsonify({"error": "Error interno del servidor", "detalle": str(e)}), 500
+
+if __name__ == "__main__":
+    app.run(debug=False, host="0.0.0.0", port=10000)
+
 
 
 
